@@ -264,6 +264,7 @@ int openssl_init_fork_handlers(void)
     return 0;
 }
 
+#if !defined(__wasi__)
 int openssl_get_fork_id(void)
 {
 # if defined(OPENSSL_SYS_UNIX)
@@ -272,4 +273,5 @@ int openssl_get_fork_id(void)
     return 0;
 # endif
 }
+#endif
 #endif
