@@ -749,6 +749,13 @@ size_t ossl_pool_acquire_entropy(RAND_POOL *pool)
     || defined(__DJGPP__)
 int ossl_pool_add_nonce_data(RAND_POOL *pool)
 {
+#if defined(__wasi__)
+    unsigned char nonce[32];
+
+    if (getentropy(nonce, sizeof(nonce)) != 0)
+        return 0;
+    return ossl_rand_pool_add(pool, nonce, sizeof(nonce), 0);
+#else
     struct {
         pid_t pid;
         CRYPTO_THREAD_ID tid;
@@ -768,6 +775,7 @@ int ossl_pool_add_nonce_data(RAND_POOL *pool)
     data.time = get_time_stamp();
 
     return ossl_rand_pool_add(pool, (unsigned char *)&data, sizeof(data), 0);
+#endif
 }
 
 /*
