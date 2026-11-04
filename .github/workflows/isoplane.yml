@@ -1,0 +1,57 @@
+name: Isoplane fork checks
+on:
+  push:
+    branches: [codex/isoplane]
+  pull_request:
+    branches: [codex/isoplane]
+  workflow_dispatch:
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
+concurrency:
+  group: isoplane-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    name: Native crypto tests and WASI library build
+    if: github.repository == 'fantail-forest/isoplane-openssl'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with: {persist-credentials: false}
+      - name: Build native libraries and tests
+        run: |
+          mkdir build-native
+          cd build-native
+          perl ../Configure linux-x86_64 no-shared no-threads no-asm
+          make -j2
+      - name: Test native random generation and EVP
+        working-directory: build-native
+        run: make test TESTS='test_rand test_evp' HARNESS_JOBS=2
+      - name: Install the pinned WASI SDK
+        working-directory: ${{ runner.temp }}
+        run: |
+          curl --fail --location --retry 3 https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-29/wasi-sdk-29.0-x86_64-linux.tar.gz -o wasi-sdk.tar.gz
+          echo '87d1d1a2879d139cdc624b968efad3d4a97b8078cdff95e63ac88ecafd1a0171  wasi-sdk.tar.gz' | sha256sum --check
+          mkdir wasi-sdk
+          tar --strip-components=1 -xzf wasi-sdk.tar.gz -C wasi-sdk
+          rm wasi-sdk.tar.gz
+      - name: Build WASI libraries with the Isoplane configuration
+        env:
+          CC: ${{ runner.temp }}/wasi-sdk/bin/clang
+          AR: ${{ runner.temp }}/wasi-sdk/bin/llvm-ar
+          RANLIB: ${{ runner.temp }}/wasi-sdk/bin/llvm-ranlib
+        run: |
+          mkdir build-wasi
+          cd build-wasi
+          perl ../Configure linux-generic32 no-shared no-threads no-asm no-dso no-module no-engine \
+            no-sock no-async no-apps no-tests no-secure-memory no-ui-console \
+            --with-rand-seed=getrandom --prefix="$RUNNER_TEMP/openssl-wasi" --openssldir=/etc/ssl
+          make -j2 build_libs
+          make install_dev
+      - name: Record disk consumption
+        if: always()
+        run: df -h .
