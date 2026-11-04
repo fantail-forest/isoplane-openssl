@@ -1,9 +1,9 @@
 name: Isoplane fork checks
 on:
   push:
-    branches: [codex/isoplane]
+    branches: [isoplane-revisions]
   pull_request:
-    branches: [codex/isoplane]
+    branches: [isoplane-revisions]
   workflow_dispatch:
 permissions:
   contents: read
