@@ -41,17 +41,53 @@ jobs:
           rm wasi-sdk.tar.gz
       - name: Build WASI libraries with the Isoplane configuration
         env:
-          CC: ${{ runner.temp }}/wasi-sdk/bin/clang
-          AR: ${{ runner.temp }}/wasi-sdk/bin/llvm-ar
-          RANLIB: ${{ runner.temp }}/wasi-sdk/bin/llvm-ranlib
+          WASI_SDK_PATH: ${{ runner.temp }}/wasi-sdk
         run: |
-          mkdir build-wasi
-          cd build-wasi
-          perl ../Configure linux-generic32 no-shared no-threads no-asm no-dso no-module no-engine \
-            no-sock no-async no-apps no-tests no-secure-memory no-ui-console \
-            --with-rand-seed=getrandom --prefix="$RUNNER_TEMP/openssl-wasi" --openssldir=/etc/ssl
-          make -j2 build_libs
-          make install_dev
+          bash util/isoplane-build-wasi.sh build-wasi "$RUNNER_TEMP/openssl-wasi" 2
+      - name: Package the WASI libraries
+        run: |
+          cp LICENSE.txt "$RUNNER_TEMP/openssl-wasi/"
+          jq -n --arg revision "$GITHUB_SHA" --arg sdk "$(cat "$RUNNER_TEMP/wasi-sdk/VERSION")" \
+            '{source_revision: $revision, wasi_sdk: $sdk}' > "$RUNNER_TEMP/openssl-wasi/source.json"
+          tar -czf openssl-wasi.tar.gz -C "$RUNNER_TEMP/openssl-wasi" .
+          sha256sum openssl-wasi.tar.gz > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: openssl-wasi
+          path: |
+            openssl-wasi.tar.gz
+            SHA256SUMS
+          retention-days: 1
+          compression-level: 0
       - name: Record disk consumption
         if: always()
         run: df -h .
+
+  publish:
+    needs: check
+    if: github.repository == 'fantail-forest/isoplane-openssl' && github.ref == 'refs/heads/isoplane-revisions' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with: {name: openssl-wasi}
+      - name: Publish revision-specific WASI libraries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="isoplane-wasi-$GITHUB_SHA"
+          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" = false ]; then
+              echo "Release $tag is already published."
+              exit 0
+            fi
+          else
+            gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease \
+              --title "Isoplane WASI libraries $GITHUB_SHA" \
+              --notes 'Static WASI OpenSSL libraries built and tested from this revision. Includes the original license and source identity.'
+          fi
+          gh release upload "$tag" openssl-wasi.tar.gz SHA256SUMS --clobber
+          gh release edit "$tag" --draft=false --latest=false
