@@ -1,7 +1,7 @@
 name: Isoplane fork checks
 on:
   push:
-    branches: [isoplane-revisions]
+    branches: [isoplane-revisions, 'isoplane/**']
   pull_request:
     branches: [isoplane-revisions]
   workflow_dispatch:
@@ -57,37 +57,8 @@ jobs:
           path: |
             openssl-wasi.tar.gz
             SHA256SUMS
-          retention-days: 1
+          retention-days: 90
           compression-level: 0
       - name: Record disk consumption
         if: always()
         run: df -h .
-
-  publish:
-    needs: check
-    if: github.repository == 'fantail-forest/isoplane-openssl' && github.ref == 'refs/heads/isoplane-revisions' && github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with: {name: openssl-wasi}
-      - name: Publish revision-specific WASI libraries
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          tag="isoplane-wasi-$GITHUB_SHA"
-          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
-            if [ "$draft" = false ]; then
-              echo "Release $tag is already published."
-              exit 0
-            fi
-          else
-            gh release create "$tag" --target "$GITHUB_SHA" --draft --prerelease \
-              --title "Isoplane WASI libraries $GITHUB_SHA" \
-              --notes 'Static WASI OpenSSL libraries built and tested from this revision. Includes the original license and source identity.'
-          fi
-          gh release upload "$tag" openssl-wasi.tar.gz SHA256SUMS --clobber
-          gh release edit "$tag" --draft=false --latest=false
